@@ -179,14 +179,12 @@ func handleMsgMhfLoadHouse(s *Session, p mhfpacket.MHFPacket) {
 		doAckSimpleFail(s, pkt.AckHandle, make([]byte, 4))
 		return
 	}
-	if pkt.Destination == 9 && houseFurniture == nil {
-		// The ZZ client crashes on a 20-zero-byte placeholder here (the real
-		// empty-state encoding hasn't been reverse-engineered yet), so fail
-		// the request cleanly instead of sending a payload it can't parse.
+	if pkt.Destination == 9 && houseFurniture == nil && s.server.erupeConfig.RealClientMode != cfg.ZZ {
 		doAckSimpleFail(s, pkt.AckHandle, make([]byte, 4))
 		return
 	}
 	if houseFurniture == nil {
+		// ZZ uses zero ownership flags and decoration index 0 for the default interior.
 		houseFurniture = make([]byte, 20)
 	}
 

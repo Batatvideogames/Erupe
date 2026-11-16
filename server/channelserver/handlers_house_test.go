@@ -1,6 +1,7 @@
 package channelserver
 
 import (
+	"bytes"
 	"erupe-ce/common/byteframe"
 	"erupe-ce/common/mhfitem"
 	"erupe-ce/common/token"
@@ -323,31 +324,48 @@ func TestLoadHouse_OwnHouse_Destination9(t *testing.T) {
 	if !ack.IsBufferResponse {
 		t.Fatal("expected buffer response")
 	}
-	if len(ack.Payload) == 0 {
-		t.Error("expected non-empty house data")
+	if !bytes.Equal(ack.Payload, interior) {
+		t.Errorf("interior changed: got %x, want %x", ack.Payload, interior)
 	}
 }
 
-// TestLoadHouse_OwnHouse_NilFurniture_FailsCleanly is a regression test for
-// issue #192: a freshly-created character has house_furniture=NULL until
-// they place something, and the ZZ client crashes on the 20-zero-byte
-// placeholder that used to be sent in that case. The handler must now fail
-// the request cleanly instead of sending an unparseable payload.
-func TestLoadHouse_OwnHouse_NilFurniture_FailsCleanly(t *testing.T) {
-	_, _, session, charID := setupHouseTest(t)
-	// No UpdateInterior call: house_furniture stays NULL, as for any
-	// never-decorated character.
-
+func TestLoadHouse_OwnHouse_NilFurniture_ZZ(t *testing.T) {
+	db, _, session, charID := setupHouseTest(t)
+	var before string
+	if err := db.Get(&before, `SELECT row_to_json(ub)::text FROM user_binary ub WHERE id=$1`, charID); err != nil {
+		t.Fatal(err)
+	}
 	pkt := &mhfpacket.MsgMhfLoadHouse{
 		AckHandle:   14,
 		CharID:      charID,
-		Destination: 9, // Own house
+		Destination: 9,
 	}
-	handleMsgMhfLoadHouse(session, pkt)
+	for attempt := 0; attempt < 2; attempt++ {
+		handleMsgMhfLoadHouse(session, pkt)
+		ack := readAck(t, session)
+		if ack.ErrorCode != 0 || !ack.IsBufferResponse || ack.AckHandle != pkt.AckHandle {
+			t.Fatalf("unexpected ACK: %+v", ack)
+		}
+		if !bytes.Equal(ack.Payload, make([]byte, 20)) {
+			t.Fatalf("unexpected default interior: %x", ack.Payload)
+		}
+	}
+	var after string
+	if err := db.Get(&after, `SELECT row_to_json(ub)::text FROM user_binary ub WHERE id=$1`, charID); err != nil {
+		t.Fatal(err)
+	}
+	if after != before {
+		t.Fatal("loading the default interior modified user_binary")
+	}
+}
 
+func TestLoadHouse_OwnHouse_NilFurniture_G10(t *testing.T) {
+	_, server, session, charID := setupHouseTest(t)
+	server.erupeConfig.RealClientMode = cfg.G10
+	handleMsgMhfLoadHouse(session, &mhfpacket.MsgMhfLoadHouse{AckHandle: 14, CharID: charID, Destination: 9})
 	ack := readAck(t, session)
 	if ack.ErrorCode == 0 {
-		t.Fatal("expected a fail ACK for nil house_furniture, got success (this is the #192 crash payload)")
+		t.Fatal("expected failure for G10 with no furniture data")
 	}
 }
 

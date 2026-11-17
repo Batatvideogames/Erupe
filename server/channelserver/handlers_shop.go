@@ -234,14 +234,11 @@ func handleMsgMhfEnumerateShop(s *Session, p mhfpacket.MHFPacket) {
 		if len(items) > int(pkt.Limit) {
 			items = items[:pkt.Limit]
 		}
-		// The client's item-shop tab renderer has a fixed-size internal buffer
-		// well below the 512-row Limit it advertises: ~420 rows in one tab is
-		// known to crash mhf.exe a couple seconds after entering the forge
-		// (see Mezeporta/Erupe#190). 256 is a conservative, unbisected safety
-		// net, not a confirmed-safe ceiling -- prefer trimming shop_items
-		// itself over relying on this cap, since truncation silently hides
-		// rows from players.
-		const maxItemShopRows = 256
+		maxItemShopRows := 256
+		if s.server.erupeConfig.RealClientMode == cfg.ZZ && pkt.ShopID == 8 {
+			// Work around the forge menu freeze.
+			maxItemShopRows = 100
+		}
 		if len(items) > maxItemShopRows {
 			items = items[:maxItemShopRows]
 		}

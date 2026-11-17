@@ -183,34 +183,40 @@ func TestHandleMsgMhfEnumerateShop_Case10_ShopItems(t *testing.T) {
 	}
 }
 
-// TestHandleMsgMhfEnumerateShop_Case10_CapsOversizedTab is a regression test
-// for issue #190: an oversized ShopType=10 (item shop) tab used to be sent to
-// the client uncapped (beyond the client's advertised Limit), which crashes
-// mhf.exe a couple seconds after entering the forge. The handler now caps
-// ShopType=10 rows to a conservative 256 regardless of the client's Limit.
 func TestHandleMsgMhfEnumerateShop_Case10_CapsOversizedTab(t *testing.T) {
-	server := createMockServer()
-	server.erupeConfig.RealClientMode = cfg.ZZ
-
-	items := make([]ShopItem, 420)
+	items := make([]ShopItem, 432)
 	for i := range items {
 		items[i] = ShopItem{ID: uint32(i + 1), ItemID: uint32(i + 1), Cost: 100, Quantity: 1}
 	}
-	server.shopRepo = &mockShopRepo{shopItems: items}
-
-	session := createMockSession(1, server)
-	pkt := &mhfpacket.MsgMhfEnumerateShop{
-		AckHandle: 100,
-		ShopType:  10,
-		ShopID:    0,
-		Limit:     512, // the client's own advertised (but unsafe) limit
-	}
-	handleMsgMhfEnumerateShop(session, pkt)
-
-	ack := readAck(t, session)
-	count := byteframe.NewByteFrameFromBytes(ack.Payload).ReadUint16()
-	if count > 256 {
-		t.Errorf("expected item count capped at 256, got %d (this is the #190 crash payload)", count)
+	for _, tc := range []struct {
+		name  string
+		mode  cfg.Mode
+		shop  uint32
+		limit uint16
+		want  int
+	}{
+		{"ZZ shop 8", cfg.ZZ, 8, 512, 100},
+		{"smaller request", cfg.ZZ, 8, 50, 50},
+		{"other shop", cfg.ZZ, 7, 512, 256},
+		{"other client", cfg.Z2, 8, 512, 256},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := createMockServer()
+			server.erupeConfig.RealClientMode = tc.mode
+			server.shopRepo = &mockShopRepo{shopItems: items}
+			session := createMockSession(1, server)
+			handleMsgMhfEnumerateShop(session, &mhfpacket.MsgMhfEnumerateShop{
+				AckHandle: 100, ShopType: 10, ShopID: tc.shop, Limit: tc.limit,
+			})
+			ack := readAck(t, session)
+			if ack.ErrorCode != 0 || len(ack.Payload) != 4+30*tc.want {
+				t.Fatalf("code=%d, bytes=%d, want %d items", ack.ErrorCode, len(ack.Payload), tc.want)
+			}
+			bf := byteframe.NewByteFrameFromBytes(ack.Payload)
+			if int(bf.ReadUint16()) != tc.want || int(bf.ReadUint16()) != tc.want {
+				t.Fatal("Incorrect shop counts")
+			}
+		})
 	}
 }
 

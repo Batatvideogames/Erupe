@@ -2,6 +2,7 @@ package channelserver
 
 import (
 	"erupe-ce/common/byteframe"
+	cfg "erupe-ce/config"
 	"erupe-ce/network/mhfpacket"
 
 	"go.uber.org/zap"
@@ -27,9 +28,13 @@ func handleMsgMhfInfoScenarioCounter(s *Session, p mhfpacket.MHFPacket) {
 		return
 	}
 
-	// Trim excess scenarios
-	if len(scenarios) > 128 {
-		scenarios = scenarios[:128]
+	maxScenarios := 128
+	if s.server.erupeConfig.RealClientMode == cfg.ZZ {
+		// 256 would wrap the count to zero.
+		maxScenarios = 255
+	}
+	if len(scenarios) > maxScenarios {
+		scenarios = scenarios[:maxScenarios]
 	}
 
 	bf := byteframe.NewByteFrame()

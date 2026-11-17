@@ -18,7 +18,7 @@ func NewScenarioRepository(db *sqlx.DB) *ScenarioRepository {
 
 // GetCounters returns all scenario counters.
 func (r *ScenarioRepository) GetCounters() ([]Scenario, error) {
-	rows, err := r.db.Query("SELECT scenario_id, category_id FROM scenario_counter")
+	rows, err := r.db.Query("SELECT scenario_id, category_id FROM scenario_counter ORDER BY id")
 	if err != nil {
 		return nil, fmt.Errorf("query scenario_counter: %w", err)
 	}

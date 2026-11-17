@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	cfg "erupe-ce/config"
 	"erupe-ce/network/mhfpacket"
 )
 
@@ -95,26 +96,42 @@ func TestHandleMsgMhfInfoScenarioCounter_WithScenarios(t *testing.T) {
 	}
 }
 
-func TestHandleMsgMhfInfoScenarioCounter_TrimTo128(t *testing.T) {
-	server := createMockServer()
-	scenarios := make([]Scenario, 200)
-	for i := range scenarios {
-		scenarios[i] = Scenario{MainID: uint32(i), CategoryID: 0}
-	}
-	server.scenarioRepo = &mockScenarioRepo{scenarios: scenarios}
-	session := createMockSession(1, server)
-
-	pkt := &mhfpacket.MsgMhfInfoScenarioCounter{AckHandle: 100}
-	handleMsgMhfInfoScenarioCounter(session, pkt)
-
-	select {
-	case p := <-session.sendPackets:
-		_, _, data := parseAckBufData(t, p.data)
-		if data[0] != 128 {
-			t.Errorf("scenario count = %d, want 128 (trimmed)", data[0])
-		}
-	default:
-		t.Fatal("No response queued")
+func TestHandleMsgMhfInfoScenarioCounter_Limits(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		mode        cfg.Mode
+		count, want int
+	}{
+		{"ZZ defaults", cfg.ZZ, 171, 171},
+		{"ZZ byte limit", cfg.ZZ, 256, 255},
+		{"G10 limit", cfg.G10, 171, 128},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := createMockServer()
+			server.erupeConfig.RealClientMode = tc.mode
+			scenarios := make([]Scenario, tc.count)
+			for i := range scenarios {
+				scenarios[i] = Scenario{MainID: uint32(i), CategoryID: 7}
+			}
+			server.scenarioRepo = &mockScenarioRepo{scenarios: scenarios}
+			session := createMockSession(1, server)
+			handleMsgMhfInfoScenarioCounter(session, &mhfpacket.MsgMhfInfoScenarioCounter{AckHandle: 100})
+			select {
+			case p := <-session.sendPackets:
+				_, code, data := parseAckBufData(t, p.data)
+				if code != 0 || len(data) != 1+6*tc.want || int(data[0]) != tc.want {
+					t.Fatalf("code=%d, bytes=%d, want %d entries", code, len(data), tc.want)
+				}
+				for i := 0; i < tc.want; i++ {
+					entry := data[1+6*i : 1+6*(i+1)]
+					if binary.BigEndian.Uint32(entry[:4]) != uint32(i) || entry[4] != 1 || entry[5] != 7 {
+						t.Fatalf("incorrect scenario at index %d", i)
+					}
+				}
+			default:
+				t.Fatal("No response queued")
+			}
+		})
 	}
 }
 
